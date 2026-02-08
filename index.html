@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>The Bug Trophy: Leap's Quest</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        /* Mobile Reset */
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent; /* Remove tap highlight on iPhone */
+            touch-action: none; /* Prevent browser handling of gestures */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            height: 100dvh; /* Dynamic viewport height for mobile browsers */
+            font-family: 'Press Start 2P', cursive;
+            overflow: hidden;
+            color: white;
+        }
+
+        #game-wrapper {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            max-width: 500px; /* Max width for tablets/desktop */
+            aspect-ratio: 2/3; /* Maintain vertical aspect ratio */
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            background: #000;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            /* Vertical Gradient: Daylight Blue to Twilight Purple */
+            background: linear-gradient(to top, #87CEEB 0%, #4B0082 100%);
+        }
+
+        /* UI Overlay Logic */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 20px;
+            z-index: 20;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        h1 {
+            font-size: clamp(20px, 5vw, 30px); /* Responsive font size */
+            color: #FFD700;
+            margin-bottom: 20px;
+            line-height: 1.5;
+            text-shadow: 2px 2px #000;
+        }
+
+        p {
+            font-size: clamp(10px, 3vw, 14px);
+            line-height: 1.8;
+            color: #ddd;
+            margin-bottom: 30px;
+            max-width: 90%;
+        }
+
+        .btn {
+            background-color: #4CAF50;
+            border: 4px solid #fff;
+            color: white;
+            padding: 20px 30px; /* Larger hit area for touch */
+            font-family: 'Press Start 2P', cursive;
+            font-size: 16px;
+            cursor: pointer;
+            text-transform: uppercase;
+            box-shadow: 0 4px #2E7D32;
+        }
+
+        .btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 0 #2E7D32;
+        }
+
+        #ui-hud {
+            position: absolute;
+            top: 15px; /* Moved down for iPhone notch safe area */
+            left: 15px;
+            font-size: 14px;
+            color: #fff;
+            text-shadow: 2px 2px 0 #000;
+            z-index: 10;
+            pointer-events: none;
+        }
+        
+        .taunt {
+            color: #ff6b6b;
+            font-style: italic;
+            font-size: 12px;
+            margin-top: 15px;
+        }
+
+        .victory-text {
+            color: #00ffea;
+        }
+
+        /* Touch Controls Hints */
+        .touch-zones {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            opacity: 0.3;
+            pointer-events: none;
+            z-index: 5;
+        }
+        
+        .touch-hint {
+            border: 2px dashed white;
+            padding: 10px;
+            border-radius: 10px;
+            font-size: 10px;
+        }
+
+    </style>
+</head>
+<body>
+
+<div id="game-wrapper">
+    <div id="ui-hud" class="hidden">Height: 0m</div>
+    
+    <div id="touch-hints" class="touch-zones hidden">
+        <div class="touch-hint">&lt; TAP LEFT</div>
+        <div class="touch-hint">TAP RIGHT &gt;</div>
+    </div>
+
+    <canvas id="gameCanvas" width="400" height="600"></canvas>
+
+    <div id="start-screen" class="overlay">
+        <h1>THE BUG TROPHY</h1>
+        <p>
+            The envious Toad King has stolen the Emerald Dragonfly!
+            <br><br>
+            Tap LEFT or RIGHT to bounce.
+            <br><br>
+            Reach 5,000m to storm the castle!
+        </p>
+        <button class="btn" id="start-btn">Start Quest</button>
+    </div>
+
+    <div id="game-over-screen" class="overlay hidden">
+        <h1 style="color: #ff4444;">GAME OVER</h1>
+        <p id="final-score">Height: 0m</p>
+        <p class="taunt">"The Trophy is mine forever!"<br>- Toad King</p>
+        <button class="btn" id="retry-btn">Try Again</button>
+    </div>
+
+    <div id="victory-screen" class="overlay hidden">
+        <h1>VICTORY!</h1>
+        <p class="victory-text">
+            The Marsh is Safe! The Toad King has been dethroned!
+        </p>
+        <p>You reclaimed the Bug Trophy.</p>
+        <button class="btn" id="play-again-btn">Play Again</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // --- Game Configuration ---
+    const GRAVITY = 0.4;
+    const JUMP_FORCE = -11;
+    const MOVE_SPEED = 5;
+    const STAGE_WIDTH = 400; // Internal Resolution
+    const STAGE_HEIGHT = 600;
+    const TARGET_HEIGHT = 5000; 
+    const PIXELS_PER_METER = 10;
+    const CASTLE_THRESHOLD = TARGET_HEIGHT * PIXELS_PER_METER;
+
+    // --- State Management ---
+    let state = 'START'; 
+    let score = 0; 
+    let maxScore = 0; 
+    let platforms = [];
+    let particles = []; // Confetti
+    let gameLoopId;
+    
+    // --- Input Handling ---
+    const keys = { left: false, right: false };
+
+    // Keyboard (Desktop fallback)
+    window.addEventListener('keydown', (e) => {
+        if (state !== 'PLAYING') return;
+        if (e.code === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = true;
+        if (e.code === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = true;
+    });
+
+    window.addEventListener('keyup', (e) => {
+        if (e.code === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = false;
+        if (e.code === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = false;
+    });
+
+    // Touch Handling (iPhone specific)
+    const gameWrapper = document.getElementById('game-wrapper');
+
+    gameWrapper.addEventListener('touchstart', (e) => {
+        if (state !== 'PLAYING') return;
+        e.preventDefault(); // Prevent scrolling
+        
+        // Get touch position relative to the screen width
+        const touchX = e.touches[0].clientX;
+        const screenWidth = window.innerWidth;
+        const middle = screenWidth / 2;
+
+        if (touchX < middle) {
+            keys.left = true;
+            keys.right = false;
+        } else {
+            keys.right = true;
+            keys.left = false;
+        }
+    }, { passive: false });
+
+    gameWrapper.addEventListener('touchend', (e) => {
+        if (state !== 'PLAYING') return;
+        e.preventDefault();
+        // Reset keys on lift
+        keys.left = false;
+        keys.right = false;
+    }, { passive: false });
+
+    // --- Entities ---
+
+    const player = {
+        x: STAGE_WIDTH / 2,
+        y: STAGE_HEIGHT - 100,
+        width: 40,
+        height: 40,
+        vx: 0,
+        vy: 0,
+        facingRight: true,
+        
+        reset() {
+            this.x = STAGE_WIDTH / 2;
+            this.y = STAGE_HEIGHT - 100;
+            this.vx = 0;
+            this.vy = 0;
+            this.facingRight = true;
+        },
+
+        draw() {
+            ctx.fillStyle = '#4CAF50';
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 20, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Eyes logic
+            const eyeOffsetX = this.facingRight ? 8 : -8;
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.arc(this.x - 8 + (this.facingRight ? 4 : -4), this.y - 12, 8, 0, Math.PI * 2);
+            ctx.arc(this.x + 8 + (this.facingRight ? 4 : -4), this.y - 12, 8, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.arc(this.x - 8 + eyeOffsetX, this.y - 12, 3, 0, Math.PI * 2);
+            ctx.arc(this.x + 8 + eyeOffsetX, this.y - 12, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.strokeStyle = '#2E7D32';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y + 5, 10, 0, Math.PI, false);
+            ctx.stroke();
+        },
+
+        update() {
+            // Movement
+            if (keys.left) {
+                this.vx = -MOVE_SPEED;
+                this.facingRight = false;
+            } else if (keys.right) {
+                this.vx = MOVE_SPEED;
+                this.facingRight = true;
+            } else {
+                this.vx = 0;
+            }
+
+            this.x += this.vx;
+
+            // Screen Wrapping
+            if (this.x < -this.width/2) this.x = STAGE_WIDTH + this.width/2;
+            else if (this.x > STAGE_WIDTH + this.width/2) this.x = -this.width/2;
+
+            // Gravity
+            this.vy += GRAVITY;
+            this.y += this.vy;
+
+            // Death Check
+            if (this.y > STAGE_HEIGHT + 50) {
+                setGameOver();
+            }
+        }
+    };
+
+    class Platform {
+        constructor(x, y, type) {
+            this.x = x;
+            this.y = y;
+            this.width = 70;
+            this.height = 20;
+            this.type = type; // 'normal', 'moving', 'crumbling', 'castle'
+            this.active = true;
+            this.dir = Math.random() < 0.5 ? 1 : -1;
+            this.speed = Math.random() * 2 + 1;
+        }
+
+        draw() {
+            if (!this.active) return;
+
+            if (this.type === 'castle') {
+                this.drawCastle();
+                return;
+            }
+
+            // Cloud Colors
+            ctx.fillStyle = this.type === 'crumbling' ? '#bdc3c7' : 'white';
+            
+            // Draw Cloud Bubbles
+            ctx.beginPath();
+            ctx.arc(this.x + 10, this.y + 10, 15, 0, Math.PI * 2);
+            ctx.arc(this.x + this.width - 10, this.y + 10, 15, 0, Math.PI * 2);
+            ctx.arc(this.x + this.width / 2, this.y + 5, 20, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Special Indicators
+            if (this.type === 'moving') {
+                ctx.fillStyle = '#87CEEB';
+                ctx.beginPath();
+                ctx.arc(this.x + this.width/2, this.y + 10, 6, 0, Math.PI*2);
+                ctx.fill();
+            } else if (this.type === 'crumbling') {
+                ctx.strokeStyle = '#7f8c8d';
+                ctx.beginPath();
+                ctx.moveTo(this.x + 15, this.y + 10);
+                ctx.lineTo(this.x + this.width - 15, this.y + 10);
+                ctx.stroke();
+            }
+        }
+
+        drawCastle() {
+            // Castle Floor
+            ctx.fillStyle = '#555';
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+            
+            // Castle Tower
+            ctx.fillStyle = '#444';
+            ctx.fillRect(this.x + 10, this.y - 120, 50, 120); 
+            
+            // Spire
+            ctx.fillStyle = '#FFD700'; 
+            ctx.beginPath();
+            ctx.moveTo(this.x + 10, this.y - 120);
+            ctx.lineTo(this.x + 35, this.y - 160);
+            ctx.lineTo(this.x + 60, this.y - 120);
+            ctx.fill();
+            
+            this.drawTrophy();
+        }
+
+        drawTrophy() {
+            const scale = 1 + Math.sin(Date.now() / 200) * 0.1;
+            ctx.save();
+            ctx.translate(this.x + this.width/2, this.y - 60);
+            ctx.scale(scale, scale);
+            
+            // Bug body
+            ctx.fillStyle = '#FFD700';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 10, 15, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Emerald
+            ctx.fillStyle = '#00FF00';
+            ctx.beginPath();
+            ctx.arc(0, 0, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Wings
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.beginPath();
+            ctx.ellipse(-12, -5, 12, 6, Math.PI / 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(12, -5, 12, 6, -Math.PI / 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        update() {
+            if (this.type === 'moving') {
+                this.x += this.speed * this.dir;
+                if (this.x <= 0 || this.x + this.width >= STAGE_WIDTH) {
+                    this.dir *= -1;
+                }
+            }
+        }
+    }
+
+    class Confetti {
+        constructor() {
+            this.reset();
+        }
+        reset() {
+            this.x = Math.random() * STAGE_WIDTH;
+            this.y = Math.random() * STAGE_HEIGHT - STAGE_HEIGHT; // Start above screen
+            this.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+            this.size = Math.random() * 6 + 3;
+            this.speedY = Math.random() * 3 + 2;
+            this.speedX = Math.random() * 2 - 1;
+            this.rotation = Math.random() * 360;
+        }
+        update() {
+            this.y += this.speedY;
+            this.x += this.speedX;
+            this.rotation += 5;
+            if (this.y > STAGE_HEIGHT) this.reset();
+        }
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(this.rotation * Math.PI / 180);
+            ctx.fillStyle = this.color;
+            ctx.fillRect(-this.size/2, -this.size/2, this.size, this.size);
+            ctx.restore();
+        }
+    }
+
+    // --- Core Functions ---
+
+    function initGame() {
+        score = 0;
+        maxScore = 0;
+        platforms = [];
+        
+        // Initial Platform under player
+        platforms.push(new Platform(STAGE_WIDTH/2 - 35, STAGE_HEIGHT - 50, 'normal'));
+
+        // Generate starting platforms
+        generatePlatforms(0, STAGE_HEIGHT - 100);
+        
+        player.reset();
+        updateHUD();
+    }
+
+    function generatePlatforms(minY, maxY) {
+        let y = maxY;
+        while (y > minY - 100) {
+            y -= (Math.random() * 60 + 40); // Random Gap between 40 and 100
+            
+            // Difficulty scaling
+            let type = 'normal';
+            if (Math.abs(score) > 20000) { // Higher up = harder
+                const rand = Math.random();
+                if (rand < 0.3) type = 'moving';
+                else if (rand < 0.5) type = 'crumbling';
+            } else if (Math.abs(score) > 10000) {
+                 if (Math.random() < 0.2) type = 'moving';
+            }
+
+            // Check for Castle Victory Condition
+            if (Math.abs(score - y) >= CASTLE_THRESHOLD) {
+                // Ensure only one castle
+                if (!platforms.some(p => p.type === 'castle')) {
+                    platforms.push(new Platform(STAGE_WIDTH/2 - 35, y, 'castle'));
+                }
+                break; 
+            }
+
+            const x = Math.random() * (STAGE_WIDTH - 70);
+            platforms.push(new Platform(x, y, type));
+        }
+    }
+
+    function checkCollisions() {
+        // Player moving down
+        if (player.vy > 0) {
+            platforms.forEach(p => {
+                if (p.active &&
+                    player.x > p.x - 10 && 
+                    player.x < p.x + p.width + 10 &&
+                    player.y + 20 >= p.y && 
+                    player.y + 20 <= p.y + p.height + 10 // Hitbox tolerance
+                ) {
+                    player.vy = JUMP_FORCE; // Bounce
+                    
+                    if (p.type === 'crumbling') {
+                        p.active = false;
+                    }
+                    if (p.type === 'castle') {
+                        setVictory();
+                    }
+                }
+            });
+        }
+    }
+
+    function updateCamera() {
+        // If player goes above middle of screen
+        if (player.y < STAGE_HEIGHT / 2) {
+            const diff = (STAGE_HEIGHT / 2) - player.y;
+            player.y += diff;
+            score += diff; // Add to total distance climbed
+            maxScore = Math.max(score, maxScore);
+
+            // Move platforms down
+            platforms.forEach(p => {
+                p.y += diff;
+            });
+
+            // Remove old platforms
+            platforms = platforms.filter(p => p.y < STAGE_HEIGHT + 50);
+
+            // Add new platforms
+            const highestPlatformY = Math.min(...platforms.map(p => p.y));
+            generatePlatforms(highestPlatformY - 100, highestPlatformY);
+            
+            updateHUD();
+        }
+    }
+
+    function updateHUD() {
+        const meters = Math.floor(maxScore / PIXELS_PER_METER);
+        document.getElementById('ui-hud').innerText = `Height: ${meters}m / 5000m`;
+    }
+
+    function setGameOver() {
+        state = 'GAMEOVER';
+        document.getElementById('final-score').innerText = `Height Reached: ${Math.floor(maxScore / PIXELS_PER_METER)}m`;
+        document.getElementById('ui-hud').classList.add('hidden');
+        document.getElementById('touch-hints').classList.add('hidden');
+        document.getElementById('game-over-screen').classList.remove('hidden');
+    }
+
+    function setVictory() {
+        state = 'VICTORY';
+        document.getElementById('ui-hud').classList.add('hidden');
+        document.getElementById('touch-hints').classList.add('hidden');
+        document.getElementById('victory-screen').classList.remove('hidden');
+        
+        // Init Confetti
+        particles = [];
+        for(let i=0; i<50; i++) particles.push(new Confetti());
+    }
+
+    // --- Loop ---
+
+    function loop() {
+        if (state === 'PLAYING') {
+            ctx.clearRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
+
+            // Gradient Background update based on height (Visual flare)
+            // Handled mostly by CSS, but we clearRect to keep it clean
+            
+            // Draw & Update Platforms
+            platforms.forEach(p => {
+                p.update();
+                p.draw();
+            });
+
+            player.update();
+            checkCollisions();
+            updateCamera();
+            player.draw();
+
+        } else if (state === 'VICTORY') {
+            ctx.clearRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
+             // Draw static scene in background
+             platforms.forEach(p => p.draw());
+             player.draw();
+             
+             // Draw Confetti
+             particles.forEach(p => {
+                 p.update();
+                 p.draw();
+             });
+        }
+
+        requestAnimationFrame(loop);
+    }
+
+    // --- Event Listeners for Buttons ---
+    document.getElementById('start-btn').addEventListener('click', () => {
+        document.getElementById('start-screen').classList.add('hidden');
+        document.getElementById('ui-hud').classList.remove('hidden');
+        document.getElementById('touch-hints').classList.remove('hidden');
+        initGame();
+        state = 'PLAYING';
+    });
+
+    document.getElementById('retry-btn').addEventListener('click', () => {
+        document.getElementById('game-over-screen').classList.add('hidden');
+        document.getElementById('ui-hud').classList.remove('hidden');
+        document.getElementById('touch-hints').classList.remove('hidden');
+        initGame();
+        state = 'PLAYING';
+    });
+
+    document.getElementById('play-again-btn').addEventListener('click', () => {
+        document.getElementById('victory-screen').classList.add('hidden');
+        document.getElementById('ui-hud').classList.remove('hidden');
+        document.getElementById('touch-hints').classList.remove('hidden');
+        initGame();
+        state = 'PLAYING';
+    });
+
+    // Start loop
+    loop();
+
+</script>
+</body>
+</html>
